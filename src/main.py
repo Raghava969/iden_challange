@@ -1,14 +1,17 @@
 import asyncio
 import json
+import os
 from pathlib import Path
+from dotenv import load_dotenv
 from playwright.async_api import async_playwright, TimeoutError as PlaywrightTimeoutError
+
+load_dotenv()
+USERNAME = os.getenv("USERNAME")
+PASSWORD = os.getenv("PASSWORD")
 
 SESSION_FILE = "session.json"
 OUTPUT_FILE = "product_data.json"
 LOGIN_URL = "https://hiring.idenhq.com/"
-
-USERNAME = "Username"
-PASSWORD = "Password"
 
 
 async def save_session(context, page):
@@ -25,7 +28,6 @@ async def save_session(context, page):
         print("✅ Session saved successfully!")
     except Exception as e:
         print(f"❌ Error saving session: {e}")
-
 
 async def load_session(context):
     """Loads session if available."""
@@ -57,6 +59,8 @@ async def load_session(context):
 
 async def login_if_needed(page):
     """Logs in only if required."""
+    if not USERNAME or not PASSWORD:
+        raise ValueError("❌ Username or Password is missing. Check your .env file.")
     try:
         print("🔹 Checking login status...")
         await page.goto(LOGIN_URL, timeout=30000)
@@ -72,8 +76,10 @@ async def login_if_needed(page):
             print("✅ Already logged in.")
     except PlaywrightTimeoutError:
         print("❌ Login page load timeout.")
+        raise RuntimeError("❌ Login page load timeout. Check internet connection.")
     except Exception as e:
         print(f"❌ Error during login: {e}")
+        raise RuntimeError(f"❌ Error during login: {e}")
 
 
 async def navigate_to_product_table(page):
@@ -92,8 +98,10 @@ async def navigate_to_product_table(page):
         print("✅ Reached product table.")
     except PlaywrightTimeoutError:
         print("❌ Timeout while navigating.")
+        raise RuntimeError("❌ Timeout while navigating to product table.")
     except Exception as e:
         print(f"❌ Error during navigation: {e}")
+        raise RuntimeError(f"❌ Error during navigation: {e}")
 
 
 async def extract_products(page):
@@ -106,15 +114,24 @@ async def extract_products(page):
         total_table_count_text = await page.locator("//div[contains(text(),'Showing ')]").text_content()
         total_count = int(total_table_count_text.split("of")[1].split("products")[0].strip())
 
+        prev_count = -1
         count = 0
         while count < total_count:
             rows = await page.locator("div.grid>div.rounded-lg").all()
             count = len(rows)
 
+             # Ensure new products are loaded before scrolling further
+            if count == prev_count:
+                break
+            
+            prev_count = count
             if count < total_count:
                 await rows[-1].hover()
                 await page.mouse.wheel(0, 200)
-                await asyncio.sleep(1)
+                await page.wait_for_function(
+                    "document.querySelectorAll('div.grid>div.rounded-lg').length > " + str(count),
+                    timeout=5000
+                )
 
         for item in rows:
             inner_elements = await item.locator("div.p-3>div>div").all()
@@ -137,9 +154,10 @@ async def extract_products(page):
         return all_products
     except PlaywrightTimeoutError:
         print("❌ Timeout while extracting products.")
+        raise RuntimeError("❌ Timeout while extracting products.")
     except Exception as e:
         print(f"❌ Error extracting products: {e}")
-    return all_products
+        raise RuntimeError(f"❌ Error extracting products: {e}")
 
 
 async def save_to_json(data):
@@ -150,6 +168,7 @@ async def save_to_json(data):
         print(f"✅ Data saved to {OUTPUT_FILE}")
     except Exception as e:
         print(f"❌ Error saving data: {e}")
+        raise RuntimeError(f"❌ Failed to save data: {e}")
 
 
 async def main():
